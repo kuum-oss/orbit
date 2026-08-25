@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: orbit-ingest
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/orbit
+    username: orbit
+    password: orbit
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  sql:
+    init:
+      mode: always
+
+server:
+  port: 8081
+
+grpc:
+  server:
+    port: 9090
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  r2dbc:
+    url: r2dbc:postgresql://postgres:5432/orbit
+  kafka:
+    bootstrap-servers: kafka:29092
+
+---
+spring:
+  config:
+    activate:
+      on-profile: test
+  r2dbc:
+    url: r2dbc:h2:mem:///testdb;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  kafka:
+    bootstrap-servers: localhost:9092

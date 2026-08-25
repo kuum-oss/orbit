@@ -192,7 +192,7 @@ ticketId, deviceId, status (BPMN state), assignedTechnician, createdFromEvent
 ## Фази реалізації
 
 - [x] **Фаза 1** — Інфраструктура: Terraform + LocalStack, mTLS CA, Docker Compose
-- [ ] **Фаза 2** — orbit-ingest (WebFlux + gRPC) + orbit-processor, Kafka pipeline
+- [x] **Фаза 2** — orbit-ingest (WebFlux + gRPC) + orbit-processor, Kafka pipeline
 - [ ] **Фаза 3** — orbit-orchestrator: Camunda engine, BPMN, delegates
 - [ ] **Фаза 4** — orbit-gateway: mTLS termination, routing
 - [ ] **Фаза 5** — Kubernetes: k3d, Helm charts, HPA

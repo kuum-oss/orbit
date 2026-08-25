@@ -128,7 +128,8 @@ services:
 
   orbit-ingest:
     build:
-      context: ./orbit-ingest
+      context: .
+      dockerfile: orbit-ingest/Dockerfile
     container_name: orbit-ingest
     profiles: ["app"]
     ports:
@@ -154,7 +155,8 @@ services:
 
   orbit-processor:
     build:
-      context: ./orbit-processor
+      context: .
+      dockerfile: orbit-processor/Dockerfile
     container_name: orbit-processor
     profiles: ["app"]
     ports:
