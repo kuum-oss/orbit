@@ -1,0 +1,70 @@
+# ========================
+# Java / Maven
+# ========================
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.jar
+*.war
+*.class
+.kotlin
+
+# ========================
+# IntelliJ IDEA
+# ========================
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# ========================
+# Eclipse
+# ========================
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+# ========================
+# VS Code
+# ========================
+.vscode/
+
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Terraform
+# ========================
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/terraform.tfstate
+infra/terraform/terraform.tfstate.backup
+infra/terraform/*.tfplan
+
+# ========================
+# mTLS — generated certificates
+# ========================
+infra/certs/generated/
+
+# ========================
+# Docker
+# ========================
+.env
+
+# ========================
+# Tests — generated output
+# ========================
+tests/test-results.txt
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/

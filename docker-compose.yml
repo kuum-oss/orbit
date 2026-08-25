@@ -1,0 +1,212 @@
+version: '3.8'
+
+networks:
+  orbit-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  kafka_data:
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: orbit-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,sns
+      - DEBUG=1
+    volumes:
+      - ./infra/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - orbit-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: orbit-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=orbit
+      - POSTGRES_USER=orbit
+      - POSTGRES_PASSWORD=orbit
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - orbit-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit -d orbit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: orbit-kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
+    networks:
+      - orbit-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-cluster cluster-id --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: orbit-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - orbit-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: orbit-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    depends_on:
+      - prometheus
+    networks:
+      - orbit-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  orbit-ingest:
+    build:
+      context: ./orbit-ingest
+    container_name: orbit-ingest
+    profiles: ["app"]
+    ports:
+      - "8081:8081"
+      - "9090:9090"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DB_URL=jdbc:postgresql://postgres:5432/orbit
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - AWS_ENDPOINT=http://localstack:4566
+    volumes:
+      - ./certs:/etc/orbit/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    networks:
+      - orbit-net
+    restart: unless-stopped
+
+  orbit-processor:
+    build:
+      context: ./orbit-processor
+    container_name: orbit-processor
+    profiles: ["app"]
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    volumes:
+      - ./certs:/etc/orbit/certs
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - orbit-net
+    restart: unless-stopped
+
+  orbit-orchestrator:
+    build:
+      context: ./orbit-orchestrator
+    container_name: orbit-orchestrator
+    profiles: ["app"]
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DB_URL=jdbc:postgresql://postgres:5432/orbit
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - orbit-net
+    restart: unless-stopped
+
+  orbit-gateway:
+    build:
+      context: ./orbit-gateway
+    container_name: orbit-gateway
+    profiles: ["app"]
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    volumes:
+      - ./certs:/etc/orbit/certs
+    depends_on:
+      - orbit-ingest
+      - orbit-processor
+      - orbit-orchestrator
+    networks:
+      - orbit-net
+    restart: unless-stopped

@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'orbit-ingest'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['orbit-ingest:8081']
+
+  - job_name: 'orbit-processor'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['orbit-processor:8082']
+
+  - job_name: 'orbit-orchestrator'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['orbit-orchestrator:8083']
+
+  - job_name: 'orbit-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['orbit-gateway:8080']
