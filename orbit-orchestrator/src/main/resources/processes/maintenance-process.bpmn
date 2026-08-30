@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="Definitions_OrbitMaintenance"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="Camunda Modeler"
+                  exporterVersion="5.20.0">
+  <bpmn:process id="maintenance-process" name="IoT Maintenance Orchestration Process" isExecutable="true" camunda:historyTimeToLive="P180D">
+    
+    <!-- START EVENT -->
+    <bpmn:startEvent id="StartEvent_AnomalyDetected" name="Telemetry Anomaly Detected">
+      <bpmn:outgoing>Flow_StartToEvaluate</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <!-- STEP 1: EVALUATE SEVERITY -->
+    <bpmn:sequenceFlow id="Flow_StartToEvaluate" sourceRef="StartEvent_AnomalyDetected" targetRef="Task_EvaluateSeverity" />
+    <bpmn:serviceTask id="Task_EvaluateSeverity" name="Evaluate Anomaly Severity" camunda:delegateExpression="#{evaluateSeverityDelegate}">
+      <bpmn:incoming>Flow_StartToEvaluate</bpmn:incoming>
+      <bpmn:outgoing>Flow_EvaluateToGateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- SEVERITY GATEWAY -->
+    <bpmn:sequenceFlow id="Flow_EvaluateToGateway" sourceRef="Task_EvaluateSeverity" targetRef="Gateway_SeverityCheck" />
+    <bpmn:exclusiveGateway id="Gateway_SeverityCheck" name="Severity Check" default="Flow_LowMedium">
+      <bpmn:incoming>Flow_EvaluateToGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_HighCritical</bpmn:outgoing>
+      <bpmn:outgoing>Flow_LowMedium</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- HIGH / CRITICAL PATH -->
+    <bpmn:sequenceFlow id="Flow_HighCritical" name="HIGH / CRITICAL" sourceRef="Gateway_SeverityCheck" targetRef="Task_CreateTicket">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${severity == 'HIGH' || severity == 'CRITICAL'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:serviceTask id="Task_CreateTicket" name="Auto-create Maintenance Ticket" camunda:delegateExpression="#{createMaintenanceTicketDelegate}">
+      <bpmn:incoming>Flow_HighCritical</bpmn:incoming>
+      <bpmn:incoming>Flow_EscalateToCreateTicket</bpmn:incoming>
+      <bpmn:outgoing>Flow_TicketToAssign</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_TicketToAssign" sourceRef="Task_CreateTicket" targetRef="Task_AssignTechnician" />
+    <bpmn:serviceTask id="Task_AssignTechnician" name="Assign Qualified Technician" camunda:delegateExpression="#{assignTechnicianDelegate}">
+      <bpmn:incoming>Flow_TicketToAssign</bpmn:incoming>
+      <bpmn:outgoing>Flow_AssignToNotify</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_AssignToNotify" sourceRef="Task_AssignTechnician" targetRef="Task_NotifyTechnician" />
+    <bpmn:serviceTask id="Task_NotifyTechnician" name="Dispatch Notification / Alert" camunda:delegateExpression="#{notifyTechnicianDelegate}">
+      <bpmn:incoming>Flow_AssignToNotify</bpmn:incoming>
+      <bpmn:outgoing>Flow_NotifyToWait</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_NotifyToWait" sourceRef="Task_NotifyTechnician" targetRef="Task_WaitTechnicianConfirmation" />
+    <bpmn:userTask id="Task_WaitTechnicianConfirmation" name="Wait Technician Confirmation" camunda:assignee="${assignedTechnician}">
+      <bpmn:incoming>Flow_NotifyToWait</bpmn:incoming>
+      <bpmn:outgoing>Flow_WaitToClose</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:sequenceFlow id="Flow_WaitToClose" sourceRef="Task_WaitTechnicianConfirmation" targetRef="Task_CloseTicket" />
+    <bpmn:serviceTask id="Task_CloseTicket" name="Close Maintenance Ticket" camunda:delegateExpression="#{closeMaintenanceTicketDelegate}">
+      <bpmn:incoming>Flow_WaitToClose</bpmn:incoming>
+      <bpmn:outgoing>Flow_CloseToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_CloseToEnd" sourceRef="Task_CloseTicket" targetRef="EndEvent_TicketResolved" />
+    <bpmn:endEvent id="EndEvent_TicketResolved" name="Ticket Resolved &amp; Closed">
+      <bpmn:incoming>Flow_CloseToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- LOW / MEDIUM PATH -->
+    <bpmn:sequenceFlow id="Flow_LowMedium" name="LOW / MEDIUM" sourceRef="Gateway_SeverityCheck" targetRef="Task_AggregateAnomalies" />
+
+    <bpmn:serviceTask id="Task_AggregateAnomalies" name="Aggregate Anomalies" camunda:delegateExpression="#{aggregateAnomaliesDelegate}">
+      <bpmn:incoming>Flow_LowMedium</bpmn:incoming>
+      <bpmn:outgoing>Flow_AggregateToTimer</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_AggregateToTimer" sourceRef="Task_AggregateAnomalies" targetRef="Event_WaitAggregation" />
+    <bpmn:intermediateCatchEvent id="Event_WaitAggregation" name="Wait 15 Min Aggregation Window">
+      <bpmn:incoming>Flow_AggregateToTimer</bpmn:incoming>
+      <bpmn:outgoing>Flow_TimerToEvaluateAggregated</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDefinition_Aggregation">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">${aggregationTimeout}</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+
+    <bpmn:sequenceFlow id="Flow_TimerToEvaluateAggregated" sourceRef="Event_WaitAggregation" targetRef="Task_EvaluateAggregated" />
+    <bpmn:serviceTask id="Task_EvaluateAggregated" name="Re-evaluate Aggregated Anomalies" camunda:delegateExpression="#{evaluateAggregatedAnomaliesDelegate}">
+      <bpmn:incoming>Flow_TimerToEvaluateAggregated</bpmn:incoming>
+      <bpmn:outgoing>Flow_EvaluateToEscalateGateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_EvaluateToEscalateGateway" sourceRef="Task_EvaluateAggregated" targetRef="Gateway_EscalateOrDiscard" />
+    <bpmn:exclusiveGateway id="Gateway_EscalateOrDiscard" name="Escalate or Discard?" default="Flow_DiscardAnomaly">
+      <bpmn:incoming>Flow_EvaluateToEscalateGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_EscalateToCreateTicket</bpmn:outgoing>
+      <bpmn:outgoing>Flow_DiscardAnomaly</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:sequenceFlow id="Flow_EscalateToCreateTicket" name="Escalate (Threshold Exceeded)" sourceRef="Gateway_EscalateOrDiscard" targetRef="Task_CreateTicket">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${escalate == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_DiscardAnomaly" name="Discard Transient" sourceRef="Gateway_EscalateOrDiscard" targetRef="Task_DiscardAnomaly" />
+
+    <bpmn:serviceTask id="Task_DiscardAnomaly" name="Discard Transient Anomaly" camunda:delegateExpression="#{discardAnomalyDelegate}">
+      <bpmn:incoming>Flow_DiscardAnomaly</bpmn:incoming>
+      <bpmn:outgoing>Flow_DiscardToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_DiscardToEnd" sourceRef="Task_DiscardAnomaly" targetRef="EndEvent_AnomalyDiscarded" />
+    <bpmn:endEvent id="EndEvent_AnomalyDiscarded" name="Anomaly Discarded">
+      <bpmn:incoming>Flow_DiscardToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="maintenance-process">
+      <!-- Shapes -->
+      <bpmndi:BPMNShape id="_BPMNShape_StartEvent" bpmnElement="StartEvent_AnomalyDetected">
+        <dc:Bounds x="152" y="192" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="127" y="235" width="87" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_EvaluateSeverity_di" bpmnElement="Task_EvaluateSeverity">
+        <dc:Bounds x="240" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_SeverityCheck_di" bpmnElement="Gateway_SeverityCheck" isMarkerVisible="true">
+        <dc:Bounds x="395" y="185" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="382" y="155" width="76" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_CreateTicket_di" bpmnElement="Task_CreateTicket">
+        <dc:Bounds x="500" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_AssignTechnician_di" bpmnElement="Task_AssignTechnician">
+        <dc:Bounds x="660" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_NotifyTechnician_di" bpmnElement="Task_NotifyTechnician">
+        <dc:Bounds x="820" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_WaitTechnicianConfirmation_di" bpmnElement="Task_WaitTechnicianConfirmation">
+        <dc:Bounds x="980" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_CloseTicket_di" bpmnElement="Task_CloseTicket">
+        <dc:Bounds x="1140" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_TicketResolved_di" bpmnElement="EndEvent_TicketResolved">
+        <dc:Bounds x="1302" y="192" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1279" y="235" width="83" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_AggregateAnomalies_di" bpmnElement="Task_AggregateAnomalies">
+        <dc:Bounds x="500" y="320" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_WaitAggregation_di" bpmnElement="Event_WaitAggregation">
+        <dc:Bounds x="662" y="342" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="643" y="385" width="75" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_EvaluateAggregated_di" bpmnElement="Task_EvaluateAggregated">
+        <dc:Bounds x="760" y="320" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_EscalateOrDiscard_di" bpmnElement="Gateway_EscalateOrDiscard" isMarkerVisible="true">
+        <dc:Bounds x="925" y="335" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="920" y="392" width="60" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_DiscardAnomaly_di" bpmnElement="Task_DiscardAnomaly">
+        <dc:Bounds x="1040" y="320" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_AnomalyDiscarded_di" bpmnElement="EndEvent_AnomalyDiscarded">
+        <dc:Bounds x="1202" y="342" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1195" y="385" width="51" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Edges -->
+      <bpmndi:BPMNEdge id="Flow_StartToEvaluate_di" bpmnElement="Flow_StartToEvaluate">
+        <di:waypoint x="188" y="210" />
+        <di:waypoint x="240" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_EvaluateToGateway_di" bpmnElement="Flow_EvaluateToGateway">
+        <di:waypoint x="340" y="210" />
+        <di:waypoint x="395" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_HighCritical_di" bpmnElement="Flow_HighCritical">
+        <di:waypoint x="445" y="210" />
+        <di:waypoint x="500" y="210" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="432" y="192" width="87" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TicketToAssign_di" bpmnElement="Flow_TicketToAssign">
+        <di:waypoint x="600" y="210" />
+        <di:waypoint x="660" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AssignToNotify_di" bpmnElement="Flow_AssignToNotify">
+        <di:waypoint x="760" y="210" />
+        <di:waypoint x="820" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_NotifyToWait_di" bpmnElement="Flow_NotifyToWait">
+        <di:waypoint x="920" y="210" />
+        <di:waypoint x="980" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_WaitToClose_di" bpmnElement="Flow_WaitToClose">
+        <di:waypoint x="1080" y="210" />
+        <di:waypoint x="1140" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_CloseToEnd_di" bpmnElement="Flow_CloseToEnd">
+        <di:waypoint x="1240" y="210" />
+        <di:waypoint x="1302" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_LowMedium_di" bpmnElement="Flow_LowMedium">
+        <di:waypoint x="420" y="235" />
+        <di:waypoint x="420" y="360" />
+        <di:waypoint x="500" y="360" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="426" y="283" width="76" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AggregateToTimer_di" bpmnElement="Flow_AggregateToTimer">
+        <di:waypoint x="600" y="360" />
+        <di:waypoint x="662" y="360" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TimerToEvaluateAggregated_di" bpmnElement="Flow_TimerToEvaluateAggregated">
+        <di:waypoint x="698" y="360" />
+        <di:waypoint x="760" y="360" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_EvaluateToEscalateGateway_di" bpmnElement="Flow_EvaluateToEscalateGateway">
+        <di:waypoint x="860" y="360" />
+        <di:waypoint x="925" y="360" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_EscalateToCreateTicket_di" bpmnElement="Flow_EscalateToCreateTicket">
+        <di:waypoint x="950" y="335" />
+        <di:waypoint x="950" y="280" />
+        <di:waypoint x="550" y="280" />
+        <di:waypoint x="550" y="250" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="726" y="262" width="67" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_DiscardAnomaly_di" bpmnElement="Flow_DiscardAnomaly">
+        <di:waypoint x="975" y="360" />
+        <di:waypoint x="1040" y="360" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="972" y="342" width="87" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_DiscardToEnd_di" bpmnElement="Flow_DiscardToEnd">
+        <di:waypoint x="1140" y="360" />
+        <di:waypoint x="1202" y="360" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

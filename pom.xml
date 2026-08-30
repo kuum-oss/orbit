@@ -26,6 +26,7 @@
     <modules>
         <module>orbit-ingest</module>
         <module>orbit-processor</module>
+        <module>orbit-orchestrator</module>
     </modules>
 
     <dependencyManagement>

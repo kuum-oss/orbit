@@ -31,6 +31,8 @@
 | `orbit-gateway` | Spring Cloud Gateway, mTLS termination | 8080 / 8443 |
 | `orbit-dashboard` | Next.js, WebSocket live view | 3001 |
 
+> Стан репозиторію: завершені фази 1–3. `orbit-gateway`, `orbit-dashboard`, Kubernetes/Helm та runtime-налаштування mTLS ще не реалізовані. Вони описані в архітектурі як цільовий стан, а не як доступні сервіси.
+
 ## Технології
 
 | Категорія | Стек |
@@ -52,9 +54,20 @@
 
 ### Передумови
 
-- Docker & Docker Compose
+- Docker Engine, запущений локально, та Docker Compose v2+
 - OpenSSL (для генерації сертифікатів)
-- Java 25+ (для збірки модулів)
+- Java 25 і Maven 3.9+ (для запуску перевірок поза Docker)
+
+Перевірка інструментів:
+
+```bash
+docker --version
+docker compose version
+java --version
+mvn --version
+```
+
+Якщо `docker compose up` повертає `permission denied ... docker.sock`, Docker Engine не запущено або поточний користувач не має доступу до його socket. Це проблема локального Docker-оточення, а не застосунку.
 
 ### 1. Згенерувати mTLS сертифікати
 
@@ -65,18 +78,30 @@ chmod +x infra/certs/generate-certs.sh
 
 Створює Root CA + сертифікати для кожного сервісу в `infra/certs/generated/`.
 
+Каталог є локальним і навмисно не потрапляє до Git. Повторний запуск перегенеровує dev-сертифікати; не використовуйте їх у production.
+
 ### 2. Запустити інфраструктуру
 
 ```bash
 docker compose up -d
+docker compose ps
 ```
 
-Це піднімає: LocalStack, PostgreSQL, Kafka, Prometheus, Grafana.
+Це піднімає: LocalStack, PostgreSQL, Kafka, Prometheus, Grafana. Дочекайтеся стану `healthy` у `docker compose ps` перед запуском застосунків: Kafka і PostgreSQL мають healthcheck-и, а старт одразу після створення контейнерів може дати тимчасові помилки з'єднання.
 
-### 3. Запустити з аплікаціями (коли модулі готові)
+### 3. Запустити готові аплікації
 
 ```bash
 docker compose --profile app up -d
+docker compose ps
+```
+
+Профіль `app` запускає `orbit-ingest`, `orbit-processor` і `orbit-orchestrator`. Сертифікати монтуються з `infra/certs/generated` у режимі лише читання. Gateway буде додано до цього шляху після завершення фази 4.
+
+Перший запуск збирає образи Maven і може тривати довше. Для діагностики конкретного сервісу:
+
+```bash
+docker compose logs -f orbit-orchestrator
 ```
 
 ### 4. Перевірити стан
@@ -88,6 +113,11 @@ docker compose --profile app up -d
 | Kafka | localhost:9092 |
 | Prometheus | http://localhost:9091 |
 | Grafana | http://localhost:3000 |
+| orbit-ingest | http://localhost:8081/actuator/health |
+| orbit-processor | http://localhost:8082/actuator/health |
+| orbit-orchestrator | http://localhost:8083/actuator/health |
+
+`orbit-gateway` на портах 8080/8443 і dashboard на 3001 на цьому етапі не запускаються.
 
 ---
 
@@ -138,7 +168,7 @@ terraform apply -auto-approve
 
 ## mTLS
 
-Кожен сервіс автентифікується через взаємні TLS-сертифікати:
+Скрипт генерує матеріали для взаємної TLS-автентифікації:
 
 ```
 Root CA (orbit-ca, 3650 днів)
@@ -150,6 +180,8 @@ Root CA (orbit-ca, 3650 днів)
 ```
 
 Пароль keystores: `orbit-dev` (змінюється через `CERT_PASSWORD`).
+
+Важливо: на завершених фазах сертифікати генеруються й монтуються в контейнери, але TLS termination і Spring SSL bundles ще не ввімкнені в runtime-конфігурації. Реальна перевірка mTLS між сервісами є завданням фази 4; поточні HTTP-приклади нижче використовують локальний `http://`.
 
 ---
 
@@ -177,15 +209,85 @@ ticketId, deviceId, status (BPMN state), assignedTechnician, createdFromEvent
         LOW/MEDIUM → Aggregate (15min) → Re-evaluate → (escalate or discard)
 ```
 
+### Наскрізний сценарій для локального користувача
+
+Після того як усі контейнери профілю `app` стали готовими, надішліть тестову HIGH-аномалію прямо в Kafka. Це скорочений, але реальний шлях до оркестратора: Kafka consumer → Camunda → PostgreSQL → REST API.
+
+```bash
+docker compose exec -T kafka kafka-console-producer \
+  --bootstrap-server kafka:29092 \
+  --topic anomaly-events <<'EOF'
+{"eventId":"a7e9e7ab-5c43-4b92-9b9e-1029384756aa","deviceId":"device-42","severity":"HIGH","detectedAt":"2026-08-30T12:00:00Z","ruleTriggered":"TEMPERATURE_THRESHOLD","description":"Temperature exceeded safe range","telemetryValue":91.5,"metricType":"TEMPERATURE"}
+EOF
+```
+
+Перегляньте створений ticket:
+
+```bash
+curl -fsS 'http://localhost:8083/api/v1/tickets?deviceId=device-42'
+```
+
+У відповіді ticket має стан `WAITING_CONFIRMATION` і заповнене поле `assignedTechnician`. Якщо встановлено `jq`, можна взяти ідентифікатор першого ticket:
+
+```bash
+TICKET_ID=$(curl -fsS 'http://localhost:8083/api/v1/tickets?deviceId=device-42' | jq -r '.[0].ticketId')
+```
+
+Підтвердіть виконання робіт через публічний API та перевірте фінальний стан:
+
+```bash
+curl -fsS -X POST "http://localhost:8083/api/v1/tickets/${TICKET_ID}/confirm" \
+  -H 'Content-Type: application/json' \
+  -d '{"technicianId":"tech-thermo-alpha","notes":"Replaced cooling fan"}'
+
+curl -fsS "http://localhost:8083/api/v1/tickets/${TICKET_ID}"
+```
+
+Очікуваний результат: відповідь на `confirm` має `CONFIRMED_AND_COMPLETED`, а останній `GET` — `status: "CLOSED"` та передані `resolutionNotes`. Ім'я техніка має відповідати фактично призначеному `assignedTechnician`; у прикладі використовується перший технік температурного пулу.
+
+Низькі та середні аномалії не створюють ticket одразу: BPMN чекає 15 хвилин, агрегує події для пристрою й лише після перевищення порогу ескалує їх. Для швидкої ручної перевірки використовуйте `HIGH` або `CRITICAL`.
+
+### Корисні API оркестратора
+
+| Метод | Шлях | Призначення |
+|---|---|---|
+| `GET` | `/api/v1/tickets` | Усі tickets; підтримує `deviceId` і `status` |
+| `GET` | `/api/v1/tickets/{ticketId}` | Один ticket |
+| `GET` | `/api/v1/tickets/stats` | Статистика за станом і severity |
+| `POST` | `/api/v1/tickets/{ticketId}/assign` | Ручне призначення, тіло: `{"technicianId":"..."}` |
+| `POST` | `/api/v1/tickets/{ticketId}/confirm` | Підтвердження й закриття BPMN-процесу |
+| `POST` | `/api/v1/tickets/{ticketId}/close` | Ручне закриття, тіло: `{"notes":"..."}` |
+
 ---
 
 ## Тестування
 
 ```bash
 ./tests/test-phase1.sh
+mvn -pl orbit-orchestrator -am test
 ```
 
-Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init.
+Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; а також наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`.
+
+Інтеграційний тест оркестратора використовує H2, вбудований Camunda engine і `MockMvc`; Kafka listener у ньому вимкнено, а handler викликається безпосередньо. Тому тест перевіряє доменний і HTTP-потік без потреби у Docker, але не замінює ручний Compose-сценарій вище.
+
+## Зупинка та очищення
+
+```bash
+docker compose --profile app down
+```
+
+Команда зупиняє контейнери, але зберігає дані PostgreSQL і Kafka у Docker volumes. Для повного скидання локальних даних використовуйте `docker compose --profile app down -v`; це незворотно видалить tickets, Camunda history і Kafka-дані.
+
+## Типові проблеми
+
+| Симптом | Що перевірити |
+|---|---|
+| `permission denied ... docker.sock` | Запустіть Docker Desktop/Engine і надайте користувачу доступ до Docker socket. |
+| Контейнер застосунку завершується одразу | `docker compose logs orbit-orchestrator`; перевірте готовність PostgreSQL/Kafka та наявність `infra/certs/generated`. |
+| Немає ticket після повідомлення | Переконайтеся, що topic — `anomaly-events`, JSON містить коректні UUID, ISO-8601 `detectedAt` і `severity` з `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. Для `LOW`/`MEDIUM` ticket не з'являється негайно. |
+| `confirm` повертає конфлікт | Ticket уже закритий або процес не перебуває на кроці `Wait Technician Confirmation`. Спочатку перевірте `GET /api/v1/tickets/{ticketId}`. |
+| Порт уже зайнятий | Зупиніть попередні контейнери або змініть host-port у `docker-compose.yml`. |
 
 ---
 
@@ -193,7 +295,7 @@ ticketId, deviceId, status (BPMN state), assignedTechnician, createdFromEvent
 
 - [x] **Фаза 1** — Інфраструктура: Terraform + LocalStack, mTLS CA, Docker Compose
 - [x] **Фаза 2** — orbit-ingest (WebFlux + gRPC) + orbit-processor, Kafka pipeline
-- [ ] **Фаза 3** — orbit-orchestrator: Camunda engine, BPMN, delegates
+- [x] **Фаза 3** — orbit-orchestrator: Camunda engine, BPMN, delegates
 - [ ] **Фаза 4** — orbit-gateway: mTLS termination, routing
 - [ ] **Фаза 5** — Kubernetes: k3d, Helm charts, HPA
 - [ ] **Фаза 6** — orbit-dashboard: Next.js + WebSocket + BPMN viewer

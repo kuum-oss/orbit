@@ -1,20 +1,17 @@
 FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /app
 
-# Copy root pom and module poms
 COPY pom.xml .
 COPY orbit-ingest/pom.xml orbit-ingest/
 COPY orbit-processor/pom.xml orbit-processor/
+COPY orbit-orchestrator/pom.xml orbit-orchestrator/
+COPY orbit-orchestrator/src orbit-orchestrator/src
 
-# Copy sources
-COPY orbit-ingest/src orbit-ingest/src
-
-# Build jar
-RUN mvn clean package -pl orbit-ingest -am -DskipTests
+RUN mvn clean package -pl orbit-orchestrator -am -DskipTests
 
 FROM eclipse-temurin:25-jre
 WORKDIR /app
-COPY --from=build /app/orbit-ingest/target/*.jar app.jar
+COPY --from=build /app/orbit-orchestrator/target/*.jar app.jar
 
-EXPOSE 8081 9090
+EXPOSE 8083
 ENTRYPOINT ["java", "-jar", "app.jar"]
