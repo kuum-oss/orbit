@@ -35,6 +35,16 @@ jobs:
           chmod +x tests/test-phase1.sh
           ./tests/test-phase1.sh
 
+      - name: Run Phase 2 Pipeline Tests
+        run: |
+          chmod +x tests/test-phase2.sh
+          ./tests/test-phase2.sh
+
+      - name: Run Phase 3 Orchestrator Tests
+        run: |
+          chmod +x tests/test-phase3.sh
+          ./tests/test-phase3.sh
+
   maven-tests:
     name: Build & Test Applications (Java 25)
     runs-on: ubuntu-latest

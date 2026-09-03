@@ -303,11 +303,13 @@ curl -fsS http://localhost:8080/api/v1/tickets
 
 ```bash
 ./tests/test-phase1.sh
+./tests/test-phase2.sh
+./tests/test-phase3.sh
 mvn test
 ```
 
 Також налаштовано автоматичний запуск тестів у **GitHub Actions** (`.github/workflows/ci.yml`):
-- **`infra-tests`**: перевірка структури проєкту, валідація Terraform/Docker Compose/Prometheus, генерація сертифікатів mTLS (`tests/test-phase1.sh`).
+- **`infra-tests`**: перевірка інфраструктури, контрактів та конфігурацій сервісів (`tests/test-phase1.sh`, `tests/test-phase2.sh`, `tests/test-phase3.sh`).
 - **`maven-tests`**: компіляція та прогін усіх unit/integration тестів для всіх модулів платформи (`orbit-ingest`, `orbit-processor`, `orbit-orchestrator`, `orbit-gateway`) на Java 25.
 
 Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`; а також тести маршрутизації, mTLS фільтрів, security headers та circuit breaker fallbacks в `orbit-gateway`.
