@@ -84,22 +84,24 @@ class MtlsAuthenticationFilterTest {
 
         // Standard embedded test certificate self-contained in test code (no external filesystem path dependency)
         String certPem = "-----BEGIN CERTIFICATE-----\n" +
-                "MIIC8DCCAdigAwIBAgIUeN7hUj7N2yW6rP1q3s5t8v9w0x4wDQYJKoZIhvcNAQEL\n" +
-                "BQAwMDELMAkGA1UEBhMCVVMxETAPGA1UECAwIVGVzdFN0cjEOMAwGA1UEAwwFT1JC\n" +
-                "SVQwHhcNMjYwOTAzMDAwMDAwWhcNMzYwOTAxMDAwMDAwWjA7MQswCQYDVQQGEwJV\n" +
-                "UzERMA8GA1UECAwIVGVzdFN0cjEUMBIGA1UEAwwLb3JiaXQtZGV2aWNlMIIBIjAN\n" +
-                "BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1sK5o2yB9z6q1X4n2v9m7k8j0l1o\n" +
-                "3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p\n" +
-                "7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n\n" +
-                "2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m\n" +
-                "7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j\n" +
-                "0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o3r6p7t4n2v9m7k8j0l1o\n" +
-                "3wIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQBVmN1c2p5e7q9r1t3y5u7i9k1m3o5p\n" +
-                "7r9t1v3x5z7b9d1f3h5j7l9n1p3r5t7v9x1z3b5d7f9h1j3l5n7p9r1t3v5x7z9b\n" +
-                "1d3f5h7j9l1n3p5r7t9v1x3z5b7d9f1h3j5l7n9p1r3t5v7x9z1b3d5f7h9j1l3n\n" +
-                "5p7r9t1v3x5z7b9d1f3h5j7l9n1p3r5t7v9x1z3b5d7f9h1j3l5n7p9r1t3v5x7z\n" +
-                "9b1d3f5h7j9l1n3p5r7t9v1x3z5b7d9f1h3j5l7n9p1r3t5v7x9z1b3d5f7h9j1l\n" +
-                "3n5p7r9t1v3x5z7b9d1f3h5j7l9n1p3r5t7v9x1z3b5d7f9h1j3l5n7p9r1t3v5x\n" +
+                "MIIDMTCCAhmgAwIBAgIUQVTR/0+bqmLnUODftx9ikCJJiG4wDQYJKoZIhvcNAQEL\n" +
+                "BQAwKDEWMBQGA1UEAwwNb3JiaXQtZ2F0ZXdheTEOMAwGA1UECgwFT3JiaXQwHhcN\n" +
+                "MjYwOTAzMTMyNTQ2WhcNMjcwOTAzMTMyNTQ2WjAoMRYwFAYDVQQDDA1vcmJpdC1n\n" +
+                "YXRld2F5MQ4wDAYDVQQKDAVPcmJpdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC\n" +
+                "AQoCggEBALSHLMHYe1uxe9eF9YSly3lKf92CjAPfZHSQFEcZ1TTOL9vgQaNesai9\n" +
+                "4uCcIztYpfretkH+y0afnOuZclhFGGw1T9WF8+TYQU3gd7u5ewTm4xchzKSa43NA\n" +
+                "Y3qgF7x1McsHDRDfuH5F/BGdtAIwCF9VMYIFlblFs3Bo/GKGI3wJUXOsL57+GgvO\n" +
+                "y0deEkuE9ClM9kx/eKvq+PieEz4jDR8O9WwdhJh1K1FPS6JyDgtlD2/RoS/Jue2q\n" +
+                "Z60IIw2GeWAiMHJ94TZVjEpoSJw/ax5BkEv268Xf2WZte7yAsAP6rhlVZw/j6iMG\n" +
+                "YX5PVxRv6t/jQkwrInJI/heILrt/qAECAwEAAaNTMFEwHQYDVR0OBBYEFDXq4Rlk\n" +
+                "JeTENO2QyAHPkOPvVFDIMB8GA1UdIwQYMBaAFDXq4RlkJeTENO2QyAHPkOPvVFDI\n" +
+                "MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAFRmlSfXwzRhxuW8\n" +
+                "UKEcONLaIxrAQ0HHPz8TZmiiHCaCvsxF3f9rLj6vCYR/r752cdmab4662bvAIkiq\n" +
+                "XwOnYDM07odLGV/2qGN2Ri271zMad8UBo8vLNH/NFHkhzwSunDl0im0KpH0kFit7\n" +
+                "W9kZjJOqDl2E1rX9trV+ge+bn7OY9Yz77YJ6EcyZAZ9KiQXkMEyT916hfFTrlxmk\n" +
+                "WXba1Sdo9qPFFCcXC5DFNttOlPC6Dhrwe9xONqySRBD4OOPqHfCz995a4M4/llvA\n" +
+                "hB0aOZeQzGyHErhoZS6FgczGAAtasVc/btmikw3EFP8Sd1r0Dkgz4BVrQKU1Xnl5\n" +
+                "b9y3kZM=\n" +
                 "-----END CERTIFICATE-----";
 
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
