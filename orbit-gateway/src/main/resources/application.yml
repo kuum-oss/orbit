@@ -45,9 +45,9 @@ management:
         enabled: true
     gateway:
       enabled: true
-  metrics:
-    export:
-      prometheus:
+  prometheus:
+    metrics:
+      export:
         enabled: true
 
 # Resilience4j Circuit Breaker defaults
