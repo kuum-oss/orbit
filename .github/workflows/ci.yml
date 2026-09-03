@@ -65,4 +65,11 @@ jobs:
           ./infra/certs/generate-certs.sh
 
       - name: Run Maven Tests
-        run: mvn clean test --batch-mode --no-transfer-progress
+        run: mvn clean test --batch-mode --no-transfer-progress -e
+
+      - name: Upload Test Reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-surefire-reports
+          path: '**/target/surefire-reports/'

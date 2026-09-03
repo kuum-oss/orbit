@@ -245,8 +245,10 @@ section "TEST 6: Unit & Integration Tests Execution"
 
 if command -v mvn >/dev/null 2>&1; then
     echo "  Running Maven test on orbit-orchestrator..."
-    if (cd "${PROJECT_ROOT}" && mvn test -pl orbit-orchestrator -q >/dev/null 2>&1); then
+    MAVEN_LOG=$(mktemp /tmp/mvn-test-phase3.XXXXXX.log 2>/dev/null || echo "mvn-test-phase3.log")
+    if (cd "${PROJECT_ROOT}" && mvn test -pl orbit-orchestrator >"${MAVEN_LOG}" 2>&1); then
         pass "orbit-orchestrator Maven test suite passed successfully"
+        rm -f "${MAVEN_LOG}"
 
         if [[ -d "${PROJECT_ROOT}/orbit-orchestrator/target/surefire-reports" ]]; then
             pass "Surefire test reports generated for orbit-orchestrator"
@@ -254,7 +256,11 @@ if command -v mvn >/dev/null 2>&1; then
             fail "Test reports missing"
         fi
     else
-        fail "orbit-orchestrator tests failed (run: mvn test -pl orbit-orchestrator for details)"
+        fail "orbit-orchestrator tests failed. Last 40 lines of build log:"
+        if [[ -f "${MAVEN_LOG}" ]]; then
+            tail -n 40 "${MAVEN_LOG}" || true
+            rm -f "${MAVEN_LOG}"
+        fi
     fi
 else
     skip "Maven CLI not installed — cannot run tests"

@@ -298,8 +298,10 @@ section "TEST 6: Multi-Module Maven Compilation & Unit Testing"
 
 if command -v mvn >/dev/null 2>&1; then
     echo "  Running Maven clean test on all modules..."
-    if (cd "${PROJECT_ROOT}" && mvn clean test -q >/dev/null 2>&1); then
+    MAVEN_LOG=$(mktemp /tmp/mvn-test-phase2.XXXXXX.log 2>/dev/null || echo "mvn-test-phase2.log")
+    if (cd "${PROJECT_ROOT}" && mvn clean test >"${MAVEN_LOG}" 2>&1); then
         pass "Maven build and all unit tests passed successfully"
+        rm -f "${MAVEN_LOG}"
         
         # Check generated proto classes
         if [[ -d "${PROJECT_ROOT}/orbit-ingest/target/generated-sources/protobuf" ]]; then
@@ -316,7 +318,11 @@ if command -v mvn >/dev/null 2>&1; then
             fail "Test reports missing"
         fi
     else
-        fail "Maven build or tests failed (run: mvn clean test for details)"
+        fail "Maven build or tests failed. Last 40 lines of build log:"
+        if [[ -f "${MAVEN_LOG}" ]]; then
+            tail -n 40 "${MAVEN_LOG}" || true
+            rm -f "${MAVEN_LOG}"
+        fi
     fi
 else
     skip "Maven CLI not installed — cannot run compilation & unit tests"
