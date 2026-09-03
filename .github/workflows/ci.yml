@@ -15,10 +15,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup OpenSSL & Docker
+      - name: Setup OpenSSL
         run: |
           sudo apt-get update
           sudo apt-get install -y openssl
+
+      - name: Ensure .env exists for CI
+        run: |
+          if [ ! -f .env ]; then
+            if [ -f .env.example ]; then
+              cp .env.example .env
+            else
+              echo "COMPOSE_PROJECT_NAME=orbit" > .env
+            fi
+          fi
 
       - name: Run Phase 1 Infrastructure Tests
         run: |
