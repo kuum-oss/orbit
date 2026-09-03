@@ -1,0 +1,168 @@
+spring:
+  application:
+    name: orbit-gateway
+  cloud:
+    gateway:
+      default-filters:
+        - name: RequestSize
+          args:
+            maxSize: 10MB
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders: "*"
+            maxAge: 3600
+
+server:
+  port: 8080
+
+# Route URIs (overridden per profile)
+orbit:
+  routes:
+    ingest-uri: http://localhost:8081
+    processor-uri: http://localhost:8082
+    orchestrator-uri: http://localhost:8083
+  mtls:
+    enabled: false
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+    gateway:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# Resilience4j Circuit Breaker defaults
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+    instances:
+      ingestCircuitBreaker:
+        baseConfig: default
+      processorCircuitBreaker:
+        baseConfig: default
+      orchestratorCircuitBreaker:
+        baseConfig: default
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 10s
+
+logging:
+  level:
+    com.orbit.gateway: DEBUG
+    org.springframework.cloud.gateway: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+orbit:
+  routes:
+    ingest-uri: http://orbit-ingest:8081
+    processor-uri: http://orbit-processor:8082
+    orchestrator-uri: http://orbit-orchestrator:8083
+
+---
+spring:
+  config:
+    activate:
+      on-profile: mtls
+  ssl:
+    bundle:
+      pem:
+        gateway-server:
+          keystore:
+            certificate: /etc/orbit/certs/orbit-gateway.crt
+            private-key: /etc/orbit/certs/orbit-gateway.key
+          truststore:
+            certificate: /etc/orbit/certs/ca.crt
+
+server:
+  port: 8443
+  ssl:
+    bundle: gateway-server
+    client-auth: need
+
+orbit:
+  mtls:
+    enabled: true
+
+logging:
+  level:
+    com.orbit.gateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker-mtls
+  ssl:
+    bundle:
+      pem:
+        gateway-server:
+          keystore:
+            certificate: /etc/orbit/certs/orbit-gateway.crt
+            private-key: /etc/orbit/certs/orbit-gateway.key
+          truststore:
+            certificate: /etc/orbit/certs/ca.crt
+
+server:
+  port: 8443
+  ssl:
+    bundle: gateway-server
+    client-auth: need
+
+orbit:
+  routes:
+    ingest-uri: https://orbit-ingest:8081
+    processor-uri: https://orbit-processor:8082
+    orchestrator-uri: https://orbit-orchestrator:8083
+  mtls:
+    enabled: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: test
+
+orbit:
+  routes:
+    ingest-uri: http://localhost:18081
+    processor-uri: http://localhost:18082
+    orchestrator-uri: http://localhost:18083
+  mtls:
+    enabled: false
+
+logging:
+  level:
+    com.orbit.gateway: DEBUG
