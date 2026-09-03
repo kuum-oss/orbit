@@ -1,5 +1,7 @@
 #  Orbit — Distributed IoT Fleet Monitoring Platform
 
+[![CI](https://github.com/kuum-oss/orbit/actions/workflows/ci.yml/badge.svg)](https://github.com/kuum-oss/orbit/actions/workflows/ci.yml)
+
 Платформа для моніторингу флоту IoT-пристроїв (банкомати, POS-термінали, вендінгові автомати).  
 Пристрої надсилають телеметрію → платформа детектує аномалії → оркеструє процеси обслуговування через BPMN → візуалізує стан флоту в реальному часі.
 
