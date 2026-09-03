@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  infra-tests:
+    name: Infrastructure & mTLS Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup OpenSSL & Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssl
+
+      - name: Run Phase 1 Infrastructure Tests
+        run: |
+          chmod +x tests/test-phase1.sh
+          ./tests/test-phase1.sh
+
+  maven-tests:
+    name: Build & Test Applications (Java 25)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'maven'
+
+      - name: Generate mTLS Certificates
+        run: |
+          chmod +x infra/certs/generate-certs.sh
+          ./infra/certs/generate-certs.sh
+
+      - name: Run Maven Tests
+        run: mvn clean test --batch-mode --no-transfer-progress
