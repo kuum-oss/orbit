@@ -31,7 +31,7 @@
 | `orbit-gateway` | Spring Cloud Gateway, mTLS termination | 8080 / 8443 |
 | `orbit-dashboard` | Next.js, WebSocket live view | 3001 |
 
-> Стан репозиторію: завершені фази 1–3. `orbit-gateway`, `orbit-dashboard`, Kubernetes/Helm та runtime-налаштування mTLS ще не реалізовані. Вони описані в архітектурі як цільовий стан, а не як доступні сервіси.
+> Стан репозиторію: завершені фази 1–4. `orbit-dashboard`, Kubernetes/Helm ще не реалізовані. Вони описані в архітектурі як цільовий стан, а не як доступні сервіси.
 
 ## Технології
 
@@ -96,7 +96,7 @@ docker compose --profile app up -d
 docker compose ps
 ```
 
-Профіль `app` запускає `orbit-ingest`, `orbit-processor` і `orbit-orchestrator`. Сертифікати монтуються з `infra/certs/generated` у режимі лише читання. Gateway буде додано до цього шляху після завершення фази 4.
+Профіль `app` запускає `orbit-ingest`, `orbit-processor`, `orbit-orchestrator` і `orbit-gateway`. Сертифікати монтуються з `infra/certs/generated` у режимі лише читання.
 
 Перший запуск збирає образи Maven і може тривати довше. Для діагностики конкретного сервісу:
 
@@ -116,8 +116,9 @@ docker compose logs -f orbit-orchestrator
 | orbit-ingest | http://localhost:8081/actuator/health |
 | orbit-processor | http://localhost:8082/actuator/health |
 | orbit-orchestrator | http://localhost:8083/actuator/health |
+| orbit-gateway | http://localhost:8080/actuator/health |
 
-`orbit-gateway` на портах 8080/8443 і dashboard на 3001 на цьому етапі не запускаються.
+`orbit-gateway` доступний на порту 8080 (HTTP) або 8443 (mTLS). Dashboard на 3001 на цьому етапі ще не запускається (Фаза 6).
 
 ---
 
@@ -125,26 +126,30 @@ docker compose logs -f orbit-orchestrator
 
 ```
 orbit/
+├── orbit-ingest/            # WebFlux + gRPC, прийом телеметрії
+├── orbit-processor/         # Детекція аномалій, event-driven
+├── orbit-orchestrator/      # Camunda BPMN процеси обслуговування
+├── orbit-gateway/           # Spring Cloud Gateway, mTLS termination, circuit breakers
 ├── infra/
-│   ├── terraform/          # IaC: S3, SQS, SNS на LocalStack
-│   │   ├── main.tf         # AWS provider → LocalStack
-│   │   ├── s3.tf           # orbit-telemetry-archives (versioning + Glacier)
-│   │   ├── sqs.tf          # telemetry-queue + DLQ (redrive)
-│   │   ├── sns.tf          # critical-alerts + SQS subscription
+│   ├── terraform/           # IaC: S3, SQS, SNS на LocalStack
+│   │   ├── main.tf          # AWS provider → LocalStack
+│   │   ├── s3.tf            # orbit-telemetry-archives (versioning + Glacier)
+│   │   ├── sqs.tf           # telemetry-queue + DLQ (redrive)
+│   │   ├── sns.tf           # critical-alerts + SQS subscription
 │   │   ├── variables.tf
 │   │   ├── outputs.tf
 │   │   └── terraform.tfvars
 │   ├── certs/
-│   │   ├── generate-certs.sh   # mTLS CA + service certs generation
+│   │   ├── generate-certs.sh    # mTLS CA + service certs generation
 │   │   └── openssl.cnf
 │   ├── localstack/
-│   │   └── init-aws.sh     # Ініціалізація AWS ресурсів при старті
+│   │   └── init-aws.sh      # Ініціалізація AWS ресурсів при старті
 │   └── prometheus/
-│       └── prometheus.yml   # Scrape config для всіх сервісів
+│       └── prometheus.yml    # Scrape config для всіх сервісів
 ├── tests/
-│   └── test-phase1.sh      # Тести інфраструктури (75 перевірок)
-├── docker-compose.yml       # Повний dev-стек
-├── pom.xml                  # Maven parent POM
+│   └── test-phase1.sh       # Тести інфраструктури (75 перевірок)
+├── docker-compose.yml        # Повний dev-стек
+├── pom.xml                   # Maven parent POM
 └── README.md
 ```
 
@@ -181,7 +186,10 @@ Root CA (orbit-ca, 3650 днів)
 
 Пароль keystores: `orbit-dev` (змінюється через `CERT_PASSWORD`).
 
-Важливо: на завершених фазах сертифікати генеруються й монтуються в контейнери, але TLS termination і Spring SSL bundles ще не ввімкнені в runtime-конфігурації. Реальна перевірка mTLS між сервісами є завданням фази 4; поточні HTTP-приклади нижче використовують локальний `http://`.
+У фазі 4 реалізовано mTLS termination на базі `orbit-gateway`:
+- Використовуються Spring Boot SSL bundles (`bundle.pem.gateway-server`), які завантажують згенеровані PEM сертифікати (`orbit-gateway.crt`, `orbit-gateway.key`, `ca.crt`).
+- Сервер підтримує профіль `mtls` (порт 8443) з вимогою валідного клієнтського сертифіката (`client-auth: need`).
+- Фільтр `MtlsAuthenticationFilter` вилучає дані клієнтського сертифіката (CN, Serial) і прокидає їх у downstream-запити в заголовках `X-Client-Certificate-CN` та `X-Client-Certificate-Serial`.
 
 ---
 
@@ -260,14 +268,44 @@ curl -fsS "http://localhost:8083/api/v1/tickets/${TICKET_ID}"
 
 ---
 
+## API Gateway (`orbit-gateway`)
+
+Модуль `orbit-gateway` виступає єдиною точкою входу, підтримує mTLS termination, прокидання сертифікатів клієнта в заголовках, додавання security headers, логування latency та захист downstream-сервісів через Resilience4j Circuit Breaker.
+
+### Маршрути Gateway
+
+| Маршрут | Метод | Шлях Gateway | Цільовий сервіс | Fallback |
+|---|---|---|---|---|
+| Telemetry Ingest | `POST` | `/api/v1/telemetry/**` | `orbit-ingest:8081` | `/fallback/ingest` (503 Service Unavailable) |
+| Ingest Health | `GET` | `/api/v1/health` | `orbit-ingest:8081` | — |
+| Anomalies | `GET` | `/api/v1/anomalies/**` | `orbit-processor:8082` | `/fallback/processor` (503 Service Unavailable) |
+| Maintenance Tickets | `GET`, `POST` | `/api/v1/tickets/**` | `orbit-orchestrator:8083` | `/fallback/orchestrator` (503 Service Unavailable) |
+| Actuator Ingest | `GET` | `/admin/ingest/actuator/**` | `orbit-ingest:8081/actuator/**` | — |
+| Actuator Processor | `GET` | `/admin/processor/actuator/**` | `orbit-processor:8082/actuator/**` | — |
+| Actuator Orchestrator | `GET` | `/admin/orchestrator/actuator/**` | `orbit-orchestrator:8083/actuator/**` | — |
+| Gateway Info | `GET` | `/gateway/info` | Локальний ендпоінт Gateway | — |
+
+Приклад звернення до API через Gateway:
+
+```bash
+# Отримати метадані Gateway та список активних маршрутів
+curl -fsS http://localhost:8080/gateway/info
+
+# Отримати список тікетів через Gateway замість прямого виклику оркестратора
+curl -fsS http://localhost:8080/api/v1/tickets
+```
+
+---
+
 ## Тестування
 
 ```bash
 ./tests/test-phase1.sh
 mvn -pl orbit-orchestrator -am test
+mvn -pl orbit-gateway -am test
 ```
 
-Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; а також наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`.
+Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`; а також тести маршрутизації, mTLS фільтрів, security headers та circuit breaker fallbacks в `orbit-gateway`.
 
 Інтеграційний тест оркестратора використовує H2, вбудований Camunda engine і `MockMvc`; Kafka listener у ньому вимкнено, а handler викликається безпосередньо. Тому тест перевіряє доменний і HTTP-потік без потреби у Docker, але не замінює ручний Compose-сценарій вище.
 
@@ -296,6 +334,6 @@ docker compose --profile app down
 - [x] **Фаза 1** — Інфраструктура: Terraform + LocalStack, mTLS CA, Docker Compose
 - [x] **Фаза 2** — orbit-ingest (WebFlux + gRPC) + orbit-processor, Kafka pipeline
 - [x] **Фаза 3** — orbit-orchestrator: Camunda engine, BPMN, delegates
-- [ ] **Фаза 4** — orbit-gateway: mTLS termination, routing
+- [x] **Фаза 4** — orbit-gateway: mTLS termination, routing
 - [ ] **Фаза 5** — Kubernetes: k3d, Helm charts, HPA
 - [ ] **Фаза 6** — orbit-dashboard: Next.js + WebSocket + BPMN viewer
