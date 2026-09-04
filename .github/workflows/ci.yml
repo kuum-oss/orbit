@@ -52,6 +52,11 @@ jobs:
           chmod +x tests/test-phase3.sh
           ./tests/test-phase3.sh
 
+      - name: Run Phase 4 Gateway Tests
+        run: |
+          chmod +x tests/test-phase4.sh
+          ./tests/test-phase4.sh
+
   maven-tests:
     name: Build & Test Applications (Java 25)
     runs-on: ubuntu-latest
