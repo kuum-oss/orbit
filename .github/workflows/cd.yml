@@ -221,10 +221,13 @@ jobs:
 
       - name: Create Ephemeral k3d Cluster
         run: |
+          # FIX 1: порт 8080 на хосте зарезервирован под loadbalancer кластера.
+          # Smoke test будет использовать port-forward на отдельные порты (18080/18090),
+          # поэтому здесь биндим 9080 — только для ingress, не конфликтует с тестами.
           k3d cluster create orbit-ci \
             --servers 1 \
             --agents 1 \
-            --port "8080:80@loadbalancer" \
+            --port "9080:80@loadbalancer" \
             --k3s-arg "--disable=traefik@server:0" \
             --wait --timeout 180s
 
@@ -258,12 +261,18 @@ jobs:
 
           echo "Deploying Orbit chart using images from GHCR (tag: ${TAG})..."
 
+          # FIX 2: gateway.managementPort=8090 — actuator без mTLS на отдельном порту.
+          # Это стандартный паттерн Spring Boot:
+          #   management.server.port=8090
+          #   management.server.ssl.enabled=false
+          # Smoke test обращается к нему по HTTP, минуя mTLS на 8080/8443.
           helm upgrade --install orbit infra/k8s/orbit-chart \
             --set ingest.image="ghcr.io/${LOWERCASE_REPO}/orbit-ingest:${TAG}" \
             --set processor.image="ghcr.io/${LOWERCASE_REPO}/orbit-processor:${TAG}" \
             --set orchestrator.image="ghcr.io/${LOWERCASE_REPO}/orbit-orchestrator:${TAG}" \
             --set gateway.image="ghcr.io/${LOWERCASE_REPO}/orbit-gateway:${TAG}" \
             --set global.imagePullPolicy=IfNotPresent \
+            --set gateway.managementPort=8090 \
             --wait --timeout 360s
 
       - name: Verify Cluster State & HPAs
@@ -282,13 +291,20 @@ jobs:
 
       - name: Run Live Smoke Tests
         run: |
-          echo "Starting port-forward for orbit-gateway..."
-          kubectl port-forward svc/orbit-gateway 8080:8080 >/dev/null 2>&1 &
+          # FIX 1: используем порты 18080 и 18090 — не конфликтуют с loadbalancer (9080).
+          # FIX 2: actuator health запрашивается через management port (8090) по HTTP,
+          #         без mTLS — иначе curl получает "Empty reply from server" (TLS handshake).
+          #         Основной трафик (8080/8443) остаётся под mTLS.
+
+          echo "Starting port-forward for orbit-gateway (main: 18080, management: 18090)..."
+          kubectl port-forward svc/orbit-gateway 18080:8080 18090:8090 >/dev/null 2>&1 &
           PF_PID=$!
+
+          # Даём port-forward время подняться
           sleep 5
 
-          echo "Pinging Gateway Actuator Health endpoint..."
-          curl --retry 5 --retry-delay 3 --retry-connrefused -fsS http://localhost:8080/actuator/health || {
+          echo "Pinging Gateway Actuator Health endpoint (plain HTTP via management port)..."
+          curl --retry 5 --retry-delay 3 --retry-connrefused -fsS http://localhost:18090/actuator/health || {
             echo "Failed to connect to Gateway actuator health"
             kill $PF_PID 2>/dev/null || true
             exit 1
@@ -296,7 +312,7 @@ jobs:
 
           echo ""
           echo "Pinging Gateway Info endpoint..."
-          curl -fsS http://localhost:8080/gateway/info || echo "Gateway info returned status"
+          curl -fsS http://localhost:18090/gateway/info || echo "Gateway info returned status"
 
           echo ""
           echo "Smoke test passed successfully!"
