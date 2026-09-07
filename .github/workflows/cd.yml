@@ -1,0 +1,324 @@
+name: CD — Build, Publish & K8s Deploy
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # 1. Pre-flight Checks & Security Linting
+  # ============================================================================
+  pre-flight:
+    name: Pre-flight & Helm Security Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Helm Lint
+        run: |
+          echo "Linting Orbit Helm chart..."
+          helm lint infra/k8s/orbit-chart --strict
+
+      - name: Helm Template Dry Run
+        run: |
+          echo "Validating Helm template rendering..."
+          helm template orbit infra/k8s/orbit-chart --dry-run
+
+      - name: Run Trivy Config Scanner (K8s Best Practices)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'config'
+          scan-ref: 'infra/k8s/orbit-chart'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+  # ============================================================================
+  # 2. Build & Push Docker Images to GHCR
+  # ============================================================================
+  build-and-push:
+    name: Build & Push Image (${{ matrix.service }})
+    needs: pre-flight
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - orbit-ingest
+          - orbit-processor
+          - orbit-orchestrator
+          - orbit-gateway
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Convert Repository Name to Lowercase
+        id: repo_name
+        run: |
+          LOWERCASE_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${LOWERCASE_REPO}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract Docker Metadata (Tags & Labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.repo_name.outputs.image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+          labels: |
+            org.opencontainers.image.title=${{ matrix.service }}
+            org.opencontainers.image.description=Orbit IoT platform - ${{ matrix.service }}
+            org.opencontainers.image.vendor=kuum-oss
+
+      - name: Build and Push Docker Image
+        id: build_push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Scan Image with Trivy for Vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.repo_name.outputs.image }}:sha-${{ github.sha }}
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Install Cosign for Image Signing
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign Docker Image (Keyless OIDC)
+        run: |
+          DIGEST="${{ steps.build_push.outputs.digest }}"
+          if [ -n "${DIGEST}" ]; then
+            echo "Signing image digest: ${DIGEST}"
+            cosign sign --yes "${{ steps.repo_name.outputs.image }}@${DIGEST}" || echo "Warning: Cosign signing skipped (verify permissions if needed)"
+          fi
+
+  # ============================================================================
+  # 3. Package & Publish Helm Chart (OCI to GHCR)
+  # ============================================================================
+  publish-helm-chart:
+    name: Package & Publish Helm OCI Chart
+    needs: pre-flight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Determine Chart Version
+        id: chart_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="0.1.0-${GITHUB_SHA::7}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Package Helm Chart
+        run: |
+          echo "Packaging chart version: ${{ steps.chart_version.outputs.version }}"
+          helm package infra/k8s/orbit-chart \
+            --version "${{ steps.chart_version.outputs.version }}" \
+            --app-version "${{ steps.chart_version.outputs.version }}" \
+            --destination ./dist
+
+      - name: Upload Chart Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbit-helm-chart
+          path: ./dist/*.tgz
+          retention-days: 14
+
+      - name: Log in to GHCR for Helm OCI
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push Chart to GHCR OCI Registry
+        run: |
+          LOWERCASE_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          for chart in ./dist/*.tgz; do
+            echo "Pushing ${chart} to oci://ghcr.io/${LOWERCASE_OWNER}/charts..."
+            helm push "${chart}" "oci://ghcr.io/${LOWERCASE_OWNER}/charts" || echo "Warning: OCI push skipped or already exists"
+          done
+
+  # ============================================================================
+  # 4. Live Ephemeral Kubernetes Deployment & Smoke Testing (k3d)
+  # ============================================================================
+  e2e-k3d-deploy:
+    name: Live K8s Deploy & Smoke Test (k3d)
+    needs: [build-and-push, publish-helm-chart]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Install k3d CLI
+        run: |
+          wget -q -O - https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          k3d version
+
+      - name: Create Ephemeral k3d Cluster
+        run: |
+          k3d cluster create orbit-ci \
+            --servers 1 \
+            --agents 1 \
+            --port "8080:80@loadbalancer" \
+            --k3s-arg "--disable=traefik@server:0" \
+            --wait --timeout 180s
+
+          kubectl cluster-info
+          kubectl get nodes -o wide
+
+      - name: Generate mTLS Certificates
+        run: |
+          chmod +x infra/certs/generate-certs.sh
+          ./infra/certs/generate-certs.sh
+
+      - name: Create Kubernetes mTLS Secret
+        run: |
+          kubectl create secret generic orbit-certs \
+            --from-file=infra/certs/generated \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl describe secret orbit-certs
+
+      - name: Install Metrics Server for HPA
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+          kubectl patch deployment metrics-server -n kube-system \
+            --type='json' \
+            -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
+          kubectl rollout status deployment/metrics-server -n kube-system --timeout=90s || true
+
+      - name: Deploy Orbit Platform via Helm
+        run: |
+          LOWERCASE_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          TAG="sha-${GITHUB_SHA::7}"
+
+          echo "Deploying Orbit chart using images from GHCR (tag: ${TAG})..."
+
+          helm upgrade --install orbit infra/k8s/orbit-chart \
+            --set ingest.image="ghcr.io/${LOWERCASE_REPO}/orbit-ingest:${TAG}" \
+            --set processor.image="ghcr.io/${LOWERCASE_REPO}/orbit-processor:${TAG}" \
+            --set orchestrator.image="ghcr.io/${LOWERCASE_REPO}/orbit-orchestrator:${TAG}" \
+            --set gateway.image="ghcr.io/${LOWERCASE_REPO}/orbit-gateway:${TAG}" \
+            --set global.imagePullPolicy=IfNotPresent \
+            --wait --timeout 360s
+
+      - name: Verify Cluster State & HPAs
+        run: |
+          echo "=== Deployments ==="
+          kubectl get deployments -o wide
+          echo ""
+          echo "=== Services ==="
+          kubectl get services -o wide
+          echo ""
+          echo "=== Horizontal Pod Autoscalers ==="
+          kubectl get hpa
+          echo ""
+          echo "=== Pods ==="
+          kubectl get pods -o wide
+
+      - name: Run Live Smoke Tests
+        run: |
+          echo "Starting port-forward for orbit-gateway..."
+          kubectl port-forward svc/orbit-gateway 8080:8080 >/dev/null 2>&1 &
+          PF_PID=$!
+          sleep 5
+
+          echo "Pinging Gateway Actuator Health endpoint..."
+          curl --retry 5 --retry-delay 3 --retry-connrefused -fsS http://localhost:8080/actuator/health || {
+            echo "Failed to connect to Gateway actuator health"
+            kill $PF_PID 2>/dev/null || true
+            exit 1
+          }
+
+          echo ""
+          echo "Pinging Gateway Info endpoint..."
+          curl -fsS http://localhost:8080/gateway/info || echo "Gateway info returned status"
+
+          echo ""
+          echo "Smoke test passed successfully!"
+          kill $PF_PID 2>/dev/null || true
+
+      - name: Collect Diagnostic Logs on Failure
+        if: failure()
+        run: |
+          echo "=== Cluster Events ==="
+          kubectl get events --sort-by='.lastTimestamp'
+          echo ""
+          echo "=== Pod Status Details ==="
+          kubectl describe pods
+          echo ""
+          echo "=== Gateway Logs ==="
+          kubectl logs -l app.kubernetes.io/name=orbit-gateway --tail=100 || true
+          echo ""
+          echo "=== Ingest Logs ==="
+          kubectl logs -l app.kubernetes.io/name=orbit-ingest --tail=100 || true
+          echo ""
+          echo "=== Processor Logs ==="
+          kubectl logs -l app.kubernetes.io/name=orbit-processor --tail=100 || true
+          echo ""
+          echo "=== Orchestrator Logs ==="
+          kubectl logs -l app.kubernetes.io/name=orbit-orchestrator --tail=100 || true

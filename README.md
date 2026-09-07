@@ -1,6 +1,7 @@
 #  Orbit — Distributed IoT Fleet Monitoring Platform
 
 [![CI](https://github.com/kuum-oss/orbit/actions/workflows/ci.yml/badge.svg)](https://github.com/kuum-oss/orbit/actions/workflows/ci.yml)
+[![CD](https://github.com/kuum-oss/orbit/actions/workflows/cd.yml/badge.svg)](https://github.com/kuum-oss/orbit/actions/workflows/cd.yml)
 
 Платформа для моніторингу флоту IoT-пристроїв (банкомати, POS-термінали, вендінгові автомати).  
 Пристрої надсилають телеметрію → платформа детектує аномалії → оркеструє процеси обслуговування через BPMN → візуалізує стан флоту в реальному часі.
@@ -160,6 +161,8 @@ orbit/
 │   ├── test-phase3.sh       # Тести BPMN-оркестратора та Camunda
 │   ├── test-phase4.sh       # Тести API Gateway та circuit breakers
 │   └── test-phase5.sh       # Тести Kubernetes, Helm charts та HPA (84 перевірки)
+├── docs/
+│   └── ci-cd.md             # Повна архітектурна документація CI/CD пайплайнів
 ├── docker-compose.yml        # Повний dev-стек
 ├── pom.xml                   # Maven parent POM
 └── README.md
@@ -374,9 +377,19 @@ kubectl get svc
 mvn test
 ```
 
-Також налаштовано автоматичний запуск тестів у **GitHub Actions** (`.github/workflows/ci.yml`):
+Також налаштовано автоматизацію у **GitHub Actions**:
+
+### 1. CI Pipeline (`.github/workflows/ci.yml`)
 - **`infra-tests`**: перевірка інфраструктури, контрактів, конфігурацій сервісів та Kubernetes-деплою (`tests/test-phase1.sh` — `tests/test-phase5.sh`). Включає валідацію `helm lint` та рендеринг маніфестів `helm template`.
 - **`maven-tests`**: компіляція та прогін усіх unit/integration тестів для всіх модулів платформи (`orbit-ingest`, `orbit-processor`, `orbit-orchestrator`, `orbit-gateway`) на Java 25.
+
+### 2. CD Pipeline (`.github/workflows/cd.yml`)
+- **Pre-flight & Lint**: сувора валідація Helm chart (`helm lint --strict`), сухий рендеринг та сканування маніфестів сканером **Trivy config**.
+- **Build & Push to GHCR**: збірка образів 4 мікросервісів через Docker Buildx з кешуванням шарів у GitHub Actions Cache, публікація в **GitHub Container Registry (`ghcr.io`)**, сканування вразливостей через **Trivy** та безключовий підпис образів через **Cosign (Sigstore OIDC)**.
+- **Helm OCI Release**: пакування чарту та пуш до OCI-реєстру GHCR (`oci://ghcr.io/<owner>/charts`).
+- **Live Ephemeral K8s Deploy & Smoke Testing**: підйом тимчасового кластера **k3d** у CI runner, генерація mTLS-сертифікатів, створення k8s secret, деплой платформи Orbit через Helm з образами GHCR, перевірка готовності всіх подів та HPA, та прогін живих Smoke HTTP-тестів через port-forward до Gateway.
+
+> Повний технічний опис конвеєрів, діаграми потоків, матриці збірки та налаштування безпеки дивіться в [**Документації CI/CD**](docs/ci-cd.md).
 
 Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`; тести маршрутизації, mTLS фільтрів, security headers та circuit breaker fallbacks в `orbit-gateway`; а також повна перевірка Helm-чарту, HPA політик, readiness/liveness проб та k3d скриптів (84 перевірки у Фазі 5).
 
