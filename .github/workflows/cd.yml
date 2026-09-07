@@ -53,7 +53,7 @@ jobs:
           helm template orbit infra/k8s/orbit-chart --dry-run
 
       - name: Run Trivy Config Scanner (K8s Best Practices)
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'config'
           scan-ref: 'infra/k8s/orbit-chart'
@@ -125,7 +125,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
       - name: Scan Image with Trivy for Vulnerabilities
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.repo_name.outputs.image }}:sha-${{ github.sha }}
           format: 'table'
