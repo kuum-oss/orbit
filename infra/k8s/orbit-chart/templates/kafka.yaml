@@ -18,6 +18,7 @@ spec:
         app.kubernetes.io/name: kafka
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      enableServiceLinks: false
       containers:
         - name: kafka
           image: {{ .Values.kafka.image }}
@@ -46,23 +47,17 @@ spec:
             - name: CLUSTER_ID
               value: {{ .Values.kafka.clusterId }}
           readinessProbe:
-            exec:
-              command:
-                - kafka-cluster
-                - cluster-id
-                - --bootstrap-server
-                - localhost:9092
-            initialDelaySeconds: 30
+            tcpSocket:
+              port: internal
+            initialDelaySeconds: 20
             periodSeconds: 10
+            failureThreshold: 6
           livenessProbe:
-            exec:
-              command:
-                - kafka-cluster
-                - cluster-id
-                - --bootstrap-server
-                - localhost:9092
-            initialDelaySeconds: 60
+            tcpSocket:
+              port: internal
+            initialDelaySeconds: 40
             periodSeconds: 15
+            failureThreshold: 4
           resources:
             {{- toYaml .Values.kafka.resources | nindent 12 }}
 ---
