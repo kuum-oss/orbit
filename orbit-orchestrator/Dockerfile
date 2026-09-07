@@ -5,6 +5,7 @@ COPY pom.xml .
 COPY orbit-ingest/pom.xml orbit-ingest/
 COPY orbit-processor/pom.xml orbit-processor/
 COPY orbit-orchestrator/pom.xml orbit-orchestrator/
+COPY orbit-gateway/pom.xml orbit-gateway/
 COPY orbit-orchestrator/src orbit-orchestrator/src
 
 RUN mvn clean package -pl orbit-orchestrator -am -DskipTests

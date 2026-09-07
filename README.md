@@ -33,7 +33,7 @@
 | `orbit-gateway` | Spring Cloud Gateway, mTLS termination | 8080 / 8443 |
 | `orbit-dashboard` | Next.js, WebSocket live view | 3001 |
 
-> Стан репозиторію: завершені фази 1–4. `orbit-dashboard`, Kubernetes/Helm ще не реалізовані. Вони описані в архітектурі як цільовий стан, а не як доступні сервіси.
+> Стан репозиторію: завершені фази 1–5. `orbit-dashboard` ще не реалізований (Фаза 6). Він описаний в архітектурі як цільовий стан, а не як доступний сервіс.
 
 ## Технології
 
@@ -146,10 +146,20 @@ orbit/
 │   │   └── openssl.cnf
 │   ├── localstack/
 │   │   └── init-aws.sh      # Ініціалізація AWS ресурсів при старті
+│   ├── k8s/
+│   │   ├── orbit-chart/         # Повний Helm chart для Orbit (Deployments, Services, HPA)
+│   │   │   ├── Chart.yaml
+│   │   │   ├── values.yaml
+│   │   │   └── templates/       # Маніфести всіх сервісів та інфраструктури
+│   │   └── k3d-setup.sh         # Скрипт створення k3d кластера та деплою
 │   └── prometheus/
 │       └── prometheus.yml    # Scrape config для всіх сервісів
 ├── tests/
-│   └── test-phase1.sh       # Тести інфраструктури (75 перевірок)
+│   ├── test-phase1.sh       # Тести інфраструктури та mTLS
+│   ├── test-phase2.sh       # Тести реактивного пайплайну та gRPC
+│   ├── test-phase3.sh       # Тести BPMN-оркестратора та Camunda
+│   ├── test-phase4.sh       # Тести API Gateway та circuit breakers
+│   └── test-phase5.sh       # Тести Kubernetes, Helm charts та HPA (84 перевірки)
 ├── docker-compose.yml        # Повний dev-стек
 ├── pom.xml                   # Maven parent POM
 └── README.md
@@ -299,20 +309,76 @@ curl -fsS http://localhost:8080/api/v1/tickets
 
 ---
 
+## Kubernetes, Helm та HPA (Фаза 5)
+
+Платформа підтримує повний production-like деплой у локальний кластер Kubernetes за допомогою **k3d** та **Helm 3**.
+
+### Компоненти Helm чарту (`infra/k8s/orbit-chart`)
+
+- **Сервіси застосунку**:
+  - `orbit-ingest`: HTTP порт 8081, gRPC порт 9090, підключення до PostgreSQL і Kafka, монтування сертифікатів mTLS.
+  - `orbit-processor`: HTTP порт 8082, підключення до Kafka, монтування сертифікатів.
+  - `orbit-orchestrator`: HTTP порт 8083, підключення до PostgreSQL (Camunda DB) та Kafka.
+  - `orbit-gateway`: Service типу `LoadBalancer`, порти 8080 (HTTP) та 8443 (HTTPS/mTLS), інтеграція з Resilience4j circuit breakers.
+- **Інфраструктура**:
+  - `postgres`: PersistentVolumeClaim + Deployment + Service.
+  - `kafka`: KRaft-mode Deployment + Service (порти 29092 внутрішній, 9092 зовнішній).
+  - `prometheus`: ConfigMap з авто-конфігурацією scrape targets для всіх сервісів платформи + Deployment + Service.
+  - `grafana`: Deployment + Service з анонімним Admin доступом.
+- **Horizontal Pod Autoscaler (HPA `autoscaling/v2`)**:
+  - Автомасштабування `orbit-ingest` (2–6 реплік, поріг 70% CPU / 80% Memory).
+  - Автомасштабування `orbit-processor` (2–6 реплік, поріг 70% CPU / 80% Memory).
+  - Автомасштабування `orbit-gateway` (2–4 репліки, поріг 70% CPU).
+- **Health Probes**:
+  - `readinessProbe` та `livenessProbe` для всіх мікросервісів через `/actuator/health/readiness` та `/actuator/health/liveness`.
+
+### Швидкий старт у k3d
+
+Скрипт `infra/k8s/k3d-setup.sh` повністю автоматизує розгортання:
+1. Перевіряє наявність `docker`, `k3d`, `kubectl`, `helm`.
+2. Створює multi-node k3d кластер (`orbit-cluster`: 1 server, 2 agents, loadbalancer port mappings).
+3. Білдить локальні Docker-образи сервісів та імпортує їх у k3d.
+4. Встановлює `metrics-server` для збору метрик HPA.
+5. Деплоїть увесь стек через `helm upgrade --install orbit`.
+
+```bash
+chmod +x infra/k8s/k3d-setup.sh
+./infra/k8s/k3d-setup.sh
+```
+
+### Корисні команди Helm / Kubectl
+
+```bash
+# Валідація синтаксису чарту
+helm lint infra/k8s/orbit-chart
+
+# Рендеринг шаблонів
+helm template orbit infra/k8s/orbit-chart
+
+# Перевірка стану подів та HPA
+kubectl get pods
+kubectl get hpa
+kubectl get svc
+```
+
+---
+
 ## Тестування
 
 ```bash
 ./tests/test-phase1.sh
 ./tests/test-phase2.sh
 ./tests/test-phase3.sh
+./tests/test-phase4.sh
+./tests/test-phase5.sh
 mvn test
 ```
 
 Також налаштовано автоматичний запуск тестів у **GitHub Actions** (`.github/workflows/ci.yml`):
-- **`infra-tests`**: перевірка інфраструктури, контрактів та конфігурацій сервісів (`tests/test-phase1.sh`, `tests/test-phase2.sh`, `tests/test-phase3.sh`).
+- **`infra-tests`**: перевірка інфраструктури, контрактів, конфігурацій сервісів та Kubernetes-деплою (`tests/test-phase1.sh` — `tests/test-phase5.sh`). Включає валідацію `helm lint` та рендеринг маніфестів `helm template`.
 - **`maven-tests`**: компіляція та прогін усіх unit/integration тестів для всіх модулів платформи (`orbit-ingest`, `orbit-processor`, `orbit-orchestrator`, `orbit-gateway`) на Java 25.
 
-Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`; а також тести маршрутизації, mTLS фільтрів, security headers та circuit breaker fallbacks в `orbit-gateway`.
+Покриття: структура файлів, Terraform конфігурація, mTLS генерація (з реальним OpenSSL), Docker Compose валідація, Prometheus, LocalStack init; наскрізний BPMN-сценарій Kafka event → HIGH ticket → technician → HTTP confirmation → `CLOSED`; тести маршрутизації, mTLS фільтрів, security headers та circuit breaker fallbacks в `orbit-gateway`; а також повна перевірка Helm-чарту, HPA політик, readiness/liveness проб та k3d скриптів (84 перевірки у Фазі 5).
 
 Інтеграційний тест оркестратора використовує H2, вбудований Camunda engine і `MockMvc`; Kafka listener у ньому вимкнено, а handler викликається безпосередньо. Тому тест перевіряє доменний і HTTP-потік без потреби у Docker, але не замінює ручний Compose-сценарій вище.
 
@@ -342,5 +408,5 @@ docker compose --profile app down
 - [x] **Фаза 2** — orbit-ingest (WebFlux + gRPC) + orbit-processor, Kafka pipeline
 - [x] **Фаза 3** — orbit-orchestrator: Camunda engine, BPMN, delegates
 - [x] **Фаза 4** — orbit-gateway: mTLS termination, routing
-- [ ] **Фаза 5** — Kubernetes: k3d, Helm charts, HPA
+- [x] **Фаза 5** — Kubernetes: k3d, Helm charts, HPA
 - [ ] **Фаза 6** — orbit-dashboard: Next.js + WebSocket + BPMN viewer

@@ -63,6 +63,15 @@ kubectl patch deployment metrics-server -n kube-system \
     --type='json' \
     -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]' 2>/dev/null || true
 
+# Create mTLS secret if certificates are generated
+if [ -d "${PROJECT_ROOT}/infra/certs/generated" ] && [ -f "${PROJECT_ROOT}/infra/certs/generated/ca.crt" ]; then
+    echo ""
+    echo "Creating orbit-certs secret from generated certificates..."
+    kubectl create secret generic orbit-certs \
+        --from-file="${PROJECT_ROOT}/infra/certs/generated" \
+        --dry-run=client -o yaml | kubectl apply -f -
+fi
+
 # Deploy with Helm
 echo ""
 echo "Deploying Orbit with Helm..."

@@ -5,6 +5,8 @@ WORKDIR /app
 COPY pom.xml .
 COPY orbit-ingest/pom.xml orbit-ingest/
 COPY orbit-processor/pom.xml orbit-processor/
+COPY orbit-orchestrator/pom.xml orbit-orchestrator/
+COPY orbit-gateway/pom.xml orbit-gateway/
 
 # Copy sources
 COPY orbit-processor/src orbit-processor/src
