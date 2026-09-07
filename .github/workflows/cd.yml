@@ -127,7 +127,7 @@ jobs:
       - name: Scan Image with Trivy for Vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ steps.repo_name.outputs.image }}:sha-${{ github.sha }}
+          image-ref: ${{ steps.repo_name.outputs.image }}@${{ steps.build_push.outputs.digest }}
           format: 'table'
           exit-code: '0'
           ignore-unfixed: true
