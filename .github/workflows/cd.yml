@@ -311,6 +311,12 @@ jobs:
           echo "=== Pod Status Details ==="
           kubectl describe pods
           echo ""
+          echo "=== Kafka Logs ==="
+          kubectl logs -l app.kubernetes.io/name=kafka --tail=100 || true
+          echo ""
+          echo "=== Postgres Logs ==="
+          kubectl logs -l app.kubernetes.io/name=postgres --tail=100 || true
+          echo ""
           echo "=== Gateway Logs ==="
           kubectl logs -l app.kubernetes.io/name=orbit-gateway --tail=100 || true
           echo ""
