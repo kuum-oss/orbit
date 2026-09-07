@@ -130,6 +130,7 @@ gateway:
   image: orbit-gateway:latest
   httpPort: 8080
   mtlsPort: 8443
+  managementPort: 8090
   springProfiles: docker
   resources:
     requests:

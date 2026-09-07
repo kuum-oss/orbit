@@ -296,16 +296,31 @@ jobs:
           #         без mTLS — иначе curl получает "Empty reply from server" (TLS handshake).
           #         Основной трафик (8080/8443) остаётся под mTLS.
 
+          echo "Gateway service ports:"
+          kubectl get svc orbit-gateway -o jsonpath='{.spec.ports[*].name}{" -> "}{.spec.ports[*].port}{"\n"}'
+
           echo "Starting port-forward for orbit-gateway (main: 18080, management: 18090)..."
-          kubectl port-forward svc/orbit-gateway 18080:8080 18090:8090 >/dev/null 2>&1 &
+          kubectl port-forward svc/orbit-gateway 18080:8080 18090:8090 > /tmp/pf-gateway.log 2>&1 &
           PF_PID=$!
 
           # Даём port-forward время подняться
-          sleep 5
+          for i in $(seq 1 15); do
+            if curl -fsS --connect-timeout 1 http://localhost:18090/actuator/health >/dev/null 2>&1; then
+              break
+            fi
+            if ! kill -0 "$PF_PID" 2>/dev/null; then
+              echo "port-forward exited unexpectedly:"
+              cat /tmp/pf-gateway.log || true
+              exit 1
+            fi
+            sleep 2
+          done
 
           echo "Pinging Gateway Actuator Health endpoint (plain HTTP via management port)..."
           curl --retry 5 --retry-delay 3 --retry-connrefused -fsS http://localhost:18090/actuator/health || {
             echo "Failed to connect to Gateway actuator health"
+            echo "port-forward log:"
+            cat /tmp/pf-gateway.log || true
             kill $PF_PID 2>/dev/null || true
             exit 1
           }

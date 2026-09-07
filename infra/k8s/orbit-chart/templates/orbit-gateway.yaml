@@ -26,9 +26,19 @@ spec:
               name: http
             - containerPort: {{ .Values.gateway.mtlsPort }}
               name: https
+            {{- if .Values.gateway.managementPort }}
+            - containerPort: {{ .Values.gateway.managementPort }}
+              name: management
+            {{- end }}
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: {{ .Values.gateway.springProfiles }}
+            {{- if .Values.gateway.managementPort }}
+            - name: MANAGEMENT_SERVER_PORT
+              value: "{{ .Values.gateway.managementPort }}"
+            - name: MANAGEMENT_SERVER_SSL_ENABLED
+              value: "false"
+            {{- end }}
           volumeMounts:
             - name: certs
               mountPath: {{ .Values.gateway.certs.mountPath }}
@@ -36,14 +46,14 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: http
+              port: {{ if .Values.gateway.managementPort }}management{{ else }}http{{ end }}
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 5
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: http
+              port: {{ if .Values.gateway.managementPort }}management{{ else }}http{{ end }}
             initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 3
@@ -73,3 +83,8 @@ spec:
     - port: {{ .Values.gateway.mtlsPort }}
       targetPort: https
       name: https
+    {{- if .Values.gateway.managementPort }}
+    - port: {{ .Values.gateway.managementPort }}
+      targetPort: management
+      name: management
+    {{- end }}
