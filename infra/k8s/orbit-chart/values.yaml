@@ -1,0 +1,148 @@
+# ==============================================
+# Orbit Helm Chart — Default Values
+# ==============================================
+
+global:
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  env: local
+
+# ------ Infrastructure ------
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  port: 5432
+  database: orbit
+  username: orbit
+  password: orbit
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+kafka:
+  enabled: true
+  image: confluentinc/cp-kafka:7.6.0
+  port: 29092
+  externalPort: 9092
+  clusterId: MkU3OEVBNTcwNTJENDM2Qk
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+prometheus:
+  enabled: true
+  image: prom/prometheus:latest
+  port: 9090
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+grafana:
+  enabled: true
+  image: grafana/grafana:latest
+  port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ------ Application Services ------
+ingest:
+  replicaCount: 2
+  image: orbit-ingest:latest
+  port: 8081
+  grpcPort: 9090
+  springProfiles: docker
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  certs:
+    mountPath: /etc/orbit/certs
+
+processor:
+  replicaCount: 2
+  image: orbit-processor:latest
+  port: 8082
+  springProfiles: docker
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  certs:
+    mountPath: /etc/orbit/certs
+
+orchestrator:
+  replicaCount: 1
+  image: orbit-orchestrator:latest
+  port: 8083
+  springProfiles: docker
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  hpa:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+
+gateway:
+  replicaCount: 2
+  image: orbit-gateway:latest
+  httpPort: 8080
+  mtlsPort: 8443
+  springProfiles: docker
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+  certs:
+    mountPath: /etc/orbit/certs
+  service:
+    type: LoadBalancer

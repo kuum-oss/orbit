@@ -1,0 +1,19 @@
+=== Orbit Platform deployed! ===
+
+Services:
+  - orbit-gateway:       http://localhost:{{ .Values.gateway.httpPort }}
+  - orbit-ingest:        http://localhost:{{ .Values.ingest.port }}
+  - orbit-processor:     http://localhost:{{ .Values.processor.port }}
+  - orbit-orchestrator:  http://localhost:{{ .Values.orchestrator.port }}
+
+Monitoring:
+  - Prometheus:  http://localhost:{{ .Values.prometheus.port }}
+  - Grafana:     http://localhost:{{ .Values.grafana.port }}
+
+To check status:
+  kubectl get pods
+  kubectl get hpa
+  kubectl get svc
+
+To port-forward gateway:
+  kubectl port-forward svc/orbit-gateway {{ .Values.gateway.httpPort }}:{{ .Values.gateway.httpPort }}

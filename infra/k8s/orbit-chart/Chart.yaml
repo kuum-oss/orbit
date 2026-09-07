@@ -1,0 +1,13 @@
+apiVersion: v2
+name: orbit
+description: Orbit — distributed IoT fleet monitoring platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - iot
+  - monitoring
+  - kubernetes
+  - spring-boot
+maintainers:
+  - name: orbit-team

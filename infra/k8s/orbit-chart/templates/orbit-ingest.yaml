@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orbit-ingest
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: orbit-ingest
+    app.kubernetes.io/component: ingest
+spec:
+  replicas: {{ .Values.ingest.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orbit-ingest
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orbit-ingest
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: orbit-ingest
+          image: {{ .Values.ingest.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.ingest.port }}
+              name: http
+            - containerPort: {{ .Values.ingest.grpcPort }}
+              name: grpc
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.ingest.springProfiles }}
+            - name: DB_URL
+              value: jdbc:postgresql://postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:{{ .Values.kafka.port }}
+            - name: AWS_ENDPOINT
+              value: http://localstack:4566
+          volumeMounts:
+            - name: certs
+              mountPath: {{ .Values.ingest.certs.mountPath }}
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.ingest.resources | nindent 12 }}
+      volumes:
+        - name: certs
+          secret:
+            secretName: orbit-certs
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orbit-ingest
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: orbit-ingest
+spec:
+  selector:
+    app.kubernetes.io/name: orbit-ingest
+  ports:
+    - port: {{ .Values.ingest.port }}
+      targetPort: http
+      name: http
+    - port: {{ .Values.ingest.grpcPort }}
+      targetPort: grpc
+      name: grpc

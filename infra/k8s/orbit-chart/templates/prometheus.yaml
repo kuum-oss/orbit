@@ -1,0 +1,85 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+      - job_name: 'orbit-ingest'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['orbit-ingest:{{ .Values.ingest.port }}']
+      - job_name: 'orbit-processor'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['orbit-processor:{{ .Values.processor.port }}']
+      - job_name: 'orbit-orchestrator'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['orbit-orchestrator:{{ .Values.orchestrator.port }}']
+      - job_name: 'orbit-gateway'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['orbit-gateway:{{ .Values.gateway.httpPort }}']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.prometheus.image }}
+          ports:
+            - containerPort: {{ .Values.prometheus.port }}
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+          resources:
+            {{- toYaml .Values.prometheus.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: prometheus
+spec:
+  selector:
+    app.kubernetes.io/name: prometheus
+  ports:
+    - port: {{ .Values.prometheus.port }}
+      targetPort: http
+      name: http
+{{- end }}

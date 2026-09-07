@@ -1,0 +1,119 @@
+{{- if .Values.ingest.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orbit-ingest-hpa
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: orbit-ingest
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orbit-ingest
+  minReplicas: {{ .Values.ingest.hpa.minReplicas }}
+  maxReplicas: {{ .Values.ingest.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ingest.hpa.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ingest.hpa.targetMemoryUtilizationPercentage }}
+{{- end }}
+---
+{{- if .Values.processor.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orbit-processor-hpa
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: orbit-processor
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orbit-processor
+  minReplicas: {{ .Values.processor.hpa.minReplicas }}
+  maxReplicas: {{ .Values.processor.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.processor.hpa.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.processor.hpa.targetMemoryUtilizationPercentage }}
+{{- end }}
+---
+{{- if .Values.orchestrator.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orbit-orchestrator-hpa
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: orbit-orchestrator
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orbit-orchestrator
+  minReplicas: {{ .Values.orchestrator.hpa.minReplicas }}
+  maxReplicas: {{ .Values.orchestrator.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.orchestrator.hpa.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.orchestrator.hpa.targetMemoryUtilizationPercentage }}
+{{- end }}
+---
+{{- if .Values.gateway.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orbit-gateway-hpa
+  labels:
+    {{- include "orbit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: orbit-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orbit-gateway
+  minReplicas: {{ .Values.gateway.hpa.minReplicas }}
+  maxReplicas: {{ .Values.gateway.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.gateway.hpa.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.gateway.hpa.targetMemoryUtilizationPercentage }}
+{{- end }}
