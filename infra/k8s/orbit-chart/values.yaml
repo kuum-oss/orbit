@@ -123,6 +123,7 @@ orchestrator:
     minReplicas: 1
     maxReplicas: 3
     targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
 
 gateway:
   replicaCount: 2
@@ -142,6 +143,7 @@ gateway:
     minReplicas: 2
     maxReplicas: 4
     targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
   certs:
     mountPath: /etc/orbit/certs
   service:

@@ -20,12 +20,14 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.ingest.hpa.targetCPUUtilizationPercentage }}
+    {{- if .Values.ingest.hpa.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
           averageUtilization: {{ .Values.ingest.hpa.targetMemoryUtilizationPercentage }}
+    {{- end }}
 {{- end }}
 ---
 {{- if .Values.processor.hpa.enabled }}
@@ -50,12 +52,14 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.processor.hpa.targetCPUUtilizationPercentage }}
+    {{- if .Values.processor.hpa.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
           averageUtilization: {{ .Values.processor.hpa.targetMemoryUtilizationPercentage }}
+    {{- end }}
 {{- end }}
 ---
 {{- if .Values.orchestrator.hpa.enabled }}
@@ -80,12 +84,14 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.orchestrator.hpa.targetCPUUtilizationPercentage }}
+    {{- if .Values.orchestrator.hpa.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
           averageUtilization: {{ .Values.orchestrator.hpa.targetMemoryUtilizationPercentage }}
+    {{- end }}
 {{- end }}
 ---
 {{- if .Values.gateway.hpa.enabled }}
@@ -110,10 +116,12 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.gateway.hpa.targetCPUUtilizationPercentage }}
+    {{- if .Values.gateway.hpa.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
           averageUtilization: {{ .Values.gateway.hpa.targetMemoryUtilizationPercentage }}
+    {{- end }}
 {{- end }}
